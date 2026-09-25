@@ -449,6 +449,15 @@ namespace
 
         out << ", in " << area << " (" << zone << ").";
 
+        // Playerbots has no spec name for the Ascension classes, so without this a healer could
+        // not tell the model what it is there for and would answer that it cannot heal.
+        if (PlayerbotAI::IsHeal(bot, true))
+            out << " You are the healer of your group.";
+        else if (PlayerbotAI::IsTank(bot, true))
+            out << " You are the tank of your group: you hold what attacks it.";
+        else
+            out << " You deal damage in a group; you neither heal nor tank.";
+
         if (bot->GetMap() && bot->GetMap()->IsDungeon())
             out << " You are inside " << bot->GetMap()->GetMapName() << ".";
 

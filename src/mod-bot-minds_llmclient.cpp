@@ -5,6 +5,7 @@
 #include "Log.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstdlib>
 #include <exception>
@@ -511,6 +512,30 @@ namespace
         return FillFromToolInput(result, input);
     }
 
+    // A small model that will not emit a tool call sometimes writes the turn out as prose instead:
+    // "should_reply: false reply: memory_additions: [] relationship_delta: {}". Spoken verbatim that
+    // is the bot reading its own form out loud, and it ignores the should_reply it just wrote. Two of
+    // these labels are enough to tell the shape apart from anything a character would say.
+    bool LooksLikeSerializedTurn(std::string const& text)
+    {
+        std::string flat;
+        flat.reserve(text.size());
+        for (char const character : text)
+            if (character != '_' && character != ' ' && character != '"' && character != '\'')
+                flat += static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+
+        static std::array<char const*, 5> const labels = {
+            "shouldreply:", "memoryadditions:", "relationshipdelta:", "reply:", "emote:"
+        };
+
+        uint32 seen = 0;
+        for (char const* label : labels)
+            if (flat.find(label) != std::string::npos)
+                ++seen;
+
+        return seen >= 2;
+    }
+
     bool FillFromTextFallback(LLMResult& result, json const& content)
     {
         if (!content.is_string())
@@ -529,6 +554,9 @@ namespace
         catch (json::parse_error const&)
         {
         }
+
+        if (LooksLikeSerializedTurn(text))
+            return false;
 
         result.reply = text;
         return true;

@@ -8,6 +8,7 @@
 #include <array>
 #include <cctype>
 #include <cstdlib>
+#include <cstring>
 #include <exception>
 #include <mutex>
 #include <utility>
@@ -513,27 +514,100 @@ namespace
     }
 
     // A small model that will not emit a tool call sometimes writes the turn out as prose instead:
-    // "should_reply: false reply: memory_additions: [] relationship_delta: {}". Spoken verbatim that
-    // is the bot reading its own form out loud, and it ignores the should_reply it just wrote. Two of
-    // these labels are enough to tell the shape apart from anything a character would say.
-    bool LooksLikeSerializedTurn(std::string const& text)
+    // "should_reply: true reply: we just found some gear memory_additions: - ...". Spoken verbatim
+    // that is the bot reading its own form out loud. The labels appear with and without their
+    // underscores depending on the model, so both spellings are looked for.
+    std::array<char const*, 9> const TURN_LABELS = {
+        "should_reply:", "shouldreply:", "memory_additions:", "memoryadditions:",
+        "relationship_delta:", "relationshipdelta:", "reply:", "emote:", "action:"
+    };
+
+    std::string Lowered(std::string const& text)
     {
-        std::string flat;
-        flat.reserve(text.size());
-        for (char const character : text)
-            if (character != '_' && character != ' ' && character != '"' && character != '\'')
-                flat += static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+        std::string lower = text;
+        std::transform(lower.begin(), lower.end(), lower.begin(),
+                       [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
+        return lower;
+    }
 
-        static std::array<char const*, 5> const labels = {
-            "shouldreply:", "memoryadditions:", "relationshipdelta:", "reply:", "emote:"
-        };
+    // A label only counts on a word boundary, so "should_reply:" is not also read as "reply:".
+    size_t FindLabel(std::string const& lower, char const* label, size_t from)
+    {
+        for (size_t at = lower.find(label, from); at != std::string::npos; at = lower.find(label, at + 1))
+        {
+            char const before = at ? lower[at - 1] : ' ';
+            if (!std::isalnum(static_cast<unsigned char>(before)) && before != '_')
+                return at;
+        }
 
+        return std::string::npos;
+    }
+
+    uint32 CountTurnLabels(std::string const& lower)
+    {
         uint32 seen = 0;
-        for (char const* label : labels)
-            if (flat.find(label) != std::string::npos)
+        for (char const* label : TURN_LABELS)
+            if (FindLabel(lower, label, 0) != std::string::npos)
                 ++seen;
 
-        return seen >= 2;
+        return seen;
+    }
+
+    std::string Trimmed(std::string text)
+    {
+        auto const spare = [](unsigned char character)
+        { return std::isspace(character) || character == '"' || character == '\'' || character == ','; };
+
+        while (!text.empty() && spare(static_cast<unsigned char>(text.front())))
+            text.erase(text.begin());
+        while (!text.empty() && spare(static_cast<unsigned char>(text.back())))
+            text.pop_back();
+
+        return text;
+    }
+
+    // What a label holds, up to wherever the next one starts.
+    std::string ValueOf(std::string const& text, std::string const& lower, char const* label)
+    {
+        size_t const at = FindLabel(lower, label, 0);
+        if (at == std::string::npos)
+            return {};
+
+        size_t const from = at + std::strlen(label);
+        size_t end = text.size();
+        for (char const* other : TURN_LABELS)
+        {
+            size_t const next = FindLabel(lower, other, from);
+            if (next != std::string::npos && next < end)
+                end = next;
+        }
+
+        return Trimmed(text.substr(from, end - from));
+    }
+
+    // The spoken line is usually in there; saying nothing at all would throw away a turn the model
+    // did produce, only in the wrong shape.
+    bool SalvageSerializedTurn(LLMResult& result, std::string const& text)
+    {
+        std::string const lower = Lowered(text);
+
+        std::string const should = Lowered(ValueOf(text, lower, "should_reply:"))
+            + Lowered(ValueOf(text, lower, "shouldreply:"));
+        if (should.find("false") != std::string::npos)
+            return false;
+
+        std::string const reply = ValueOf(text, lower, "reply:");
+        if (reply.empty())
+            return false;
+
+        result.reply = reply;
+        result.shouldReply = true;
+
+        std::string const emote = ValueOf(text, lower, "emote:");
+        if (!emote.empty() && emote.find(' ') == std::string::npos)
+            result.emote = emote;
+
+        return true;
     }
 
     bool FillFromTextFallback(LLMResult& result, json const& content)
@@ -555,8 +629,8 @@ namespace
         {
         }
 
-        if (LooksLikeSerializedTurn(text))
-            return false;
+        if (CountTurnLabels(Lowered(text)) >= 2)
+            return SalvageSerializedTurn(result, text);
 
         result.reply = text;
         return true;

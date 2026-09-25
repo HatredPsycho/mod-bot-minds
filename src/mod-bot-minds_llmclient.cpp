@@ -627,6 +627,23 @@ namespace
         BotMindsHttpClient _http;
     };
 
+    char const* const OPENAI_HOSTED_URL = "https://api.openai.com/v1/chat/completions";
+
+    // BotMinds.Url redirects the OpenAI-compatible request at a local server such as Jan or
+    // llama.cpp; left empty the hosted service is used, which is the previous behaviour.
+    std::string OpenAIEndpoint(ProviderConfig const& config)
+    {
+        if (config.url.empty())
+            return OPENAI_HOSTED_URL;
+
+        return config.url;
+    }
+
+    bool IsHostedOpenAI(std::string const& url)
+    {
+        return url.empty() || url.find("https://api.openai.com/") == 0;
+    }
+
     class OpenAIProvider final : public ILLMProvider
     {
     public:
@@ -691,12 +708,15 @@ namespace
             };
             body[tokenLimitParameter] = _config.maxTokens;
 
-            std::vector<std::pair<std::string, std::string>> const headers = {
-                {"Authorization", "Bearer " + _config.apiKey},
+            std::vector<std::pair<std::string, std::string>> headers = {
                 {"content-type", "application/json"}
             };
+            // A local server such as Jan or llama.cpp usually runs without authentication, and
+            // an empty bearer token is rejected by some of them.
+            if (!_config.apiKey.empty())
+                headers.emplace_back("Authorization", "Bearer " + _config.apiKey);
 
-            return _http.Post("https://api.openai.com/v1/chat/completions", body.dump(), headers,
+            return _http.Post(OpenAIEndpoint(_config), body.dump(), headers,
                               static_cast<int>(_config.timeoutSeconds), _config.debug);
         }
 
@@ -874,14 +894,15 @@ void InitLLMProviders()
     }
     else if (providerName == "openai")
     {
-        if (config.apiKey.empty())
+        if (config.apiKey.empty() && IsHostedOpenAI(config.url))
         {
             LOG_INFO("server.loading", "[BotMinds] Disabled: no API key is configured for OpenAI.");
         }
         else
         {
             provider = std::make_shared<OpenAIProvider>(config);
-            LOG_INFO("server.loading", "[BotMinds] Provider: OpenAI (model: {}).", config.model);
+            LOG_INFO("server.loading", "[BotMinds] Provider: OpenAI (model: {}, endpoint: {}).",
+                     config.model, OpenAIEndpoint(config));
         }
     }
     else

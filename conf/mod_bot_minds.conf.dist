@@ -59,9 +59,14 @@ BotMinds.ApiKeyEnv = ""
 BotMinds.Model = "claude-haiku-4-5"
 
 # BotMinds.Url
-#     Description: Ollama chat endpoint. Ignored by Anthropic and OpenAI.
-#                  Local:  http://localhost:11434/api/chat
-#                  Cloud:  https://ollama.com/api/chat
+#     Description: Chat endpoint for "ollama" and "openai". Ignored by Anthropic.
+#                  Ollama local:  http://localhost:11434/api/chat
+#                  Ollama cloud:  https://ollama.com/api/chat
+#                  Any OpenAI-compatible server, such as Jan or llama.cpp, is
+#                  reached with Provider "openai" and its full chat completions
+#                  URL, for example http://127.0.0.1:1337/v1/chat/completions.
+#                  Left empty with Provider "openai", api.openai.com is used and
+#                  BotMinds.ApiKey is required; a local URL needs no key.
 #     Default:     "http://localhost:11434/api/chat"
 BotMinds.Url = "http://localhost:11434/api/chat"
 

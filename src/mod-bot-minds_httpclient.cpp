@@ -1,8 +1,10 @@
+// httplib.h has to come first on Windows. Boost.Asio, reached through Log.h, pins _WIN32_WINNT
+// to 0x0601 when nothing else has set it, and cpp-httplib refuses to compile below 0x0602.
+#include <httplib.h>
+
 #include "mod-bot-minds_httpclient.h"
 
 #include "Log.h"
-
-#include <httplib.h>
 
 #include <exception>
 #include <regex>
